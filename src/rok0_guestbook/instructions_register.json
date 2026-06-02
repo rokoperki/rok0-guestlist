@@ -1,0 +1,40 @@
+{
+  "program_id": "8ftm3ruaXh2sbrTeozPDmTQk8iJbG8SoUZtyYPFiq7jS",
+  "accounts": [
+    {
+      "key": "524HMdYYBy6TAn4dK5vCcjiTmT2sxV6Xoue5EXrz22Ca",
+      "owner": "11111111111111111111111111111111",
+      "is_signer": true,
+      "is_writable": true,
+      "executable": false,
+      "lamports": 10000000000,
+      "data": []
+    },
+    {
+      "key": "FcLoCjm5bo3de1WEBcuDxKJrdf8pPxxWubfJ28jLBFop",
+      "owner": "11111111111111111111111111111111",
+      "is_signer": false,
+      "is_writable": true,
+      "executable": false,
+      "lamports": 0,
+      "data": []
+    },
+    {
+      "key": "11111111111111111111111111111111",
+      "owner": "NativeLoader1111111111111111111111111111111",
+      "is_signer": false,
+      "is_writable": false,
+      "executable": true,
+      "lamports": 1,
+      "data": []
+    }
+  ],
+  "instruction_data": [
+    0,
+    67, 65, 83, 80, 69, 82, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    255,
+    128, 132, 30, 0, 0, 0, 0, 0,
+    15, 0,
+    104, 101, 108, 108, 111, 32, 114, 111, 107, 111, 112, 101, 114, 107, 105
+  ]
+}

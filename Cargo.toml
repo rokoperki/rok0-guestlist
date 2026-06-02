@@ -1,0 +1,13 @@
+[package]
+name = "rok0-guestbook"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[dev-dependencies]
+litesvm = "0.6"
+solana-sdk = "2"
+
+[features]
+test-sbf = []
