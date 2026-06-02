@@ -411,8 +411,138 @@ reg_msg_done:
     mov64 r0, 0
     exit
 
-; ── heartbeat / promote / deregister (stub) ───────────
+; ── heartbeat ─────────────────────────────────────────
+; accounts:  [authority(0,signer)  pda(1,w)]
+; ix_data:   [disc:1]
+;
+; stack layout:
+;   [r10 -  8]  acct0 ptr (authority)
+;   [r10 - 16]  acct1 ptr (pda)
+;   [r10 - 24]  prog_id ptr
+;   [r10 - 32]  "overseer" seed string (8 bytes, ptr = r10-32)
+;   [r10 - 40]  bump (u8)
+;   [r10 - 72]  derived_pda output (32 bytes)
+;   [r10 -120]  seeds[0..2] (3 × 16 bytes)
+;   [r10 -160]  clock struct (40 bytes, unix_timestamp at +0x20 = r10-128)
+
 heartbeat_handler:
+    ; account count == 2
+    ldxdw r2, [r1 + NUM_ACCOUNTS]
+    jne   r2, 2, error_wrong_accounts_number
+
+    ; authority (acct0) is signer
+    ldxdw r2, [r10 - 8]
+    ldxb  r2, [r2 + ACCT_IS_SIGNER]
+    jne   r2, 1, error_not_signer
+
+    ; save prog_id ptr (r7+8+ix_data_len)
+    ldxdw r3, [r7 + 0]
+    mov64 r2, r7
+    add64 r2, 8
+    add64 r2, r3
+    stxdw [r10 - 24], r2
+
+    ; pda.owner == program_id
+    ldxdw r1, [r10 - 24]           ; prog_id ptr
+    ldxdw r2, [r10 - 16]
+    add64 r2, ACCT_OWNER
+    call  cmp32
+    jne   r0, 0, error_wrong_owner
+
+    ; pda.data_len >= OS_HEADER
+    ldxdw r2, [r10 - 16]
+    ldxdw r2, [r2 + ACCT_DLEN]
+    jlt   r2, OS_HEADER, error_wrong_size
+
+    ; pda.data.authority == authority.key
+    ldxdw r1, [r10 - 16]
+    add64 r1, ACCT_DATA             ; r1 = &pda.data[OS_AUTHORITY]
+    ldxdw r2, [r10 - 8]
+    add64 r2, ACCT_KEY
+    call  cmp32
+    jne   r0, 0, error_authority_mismatch
+
+    ; read bump from pda.data[OS_BUMP]
+    ldxdw r2, [r10 - 16]
+    add64 r2, ACCT_DATA
+    ldxb  r2, [r2 + OS_BUMP]
+    stxb  [r10 - 40], r2
+
+    ; write "overseer" seed string at r10-32
+    mov64 r2, 0x6F
+    stxb  [r10 - 32], r2
+    mov64 r2, 0x76
+    stxb  [r10 - 31], r2
+    mov64 r2, 0x65
+    stxb  [r10 - 30], r2
+    mov64 r2, 0x72
+    stxb  [r10 - 29], r2
+    mov64 r2, 0x73
+    stxb  [r10 - 28], r2
+    mov64 r2, 0x65
+    stxb  [r10 - 27], r2
+    mov64 r2, 0x65
+    stxb  [r10 - 26], r2
+    mov64 r2, 0x72
+    stxb  [r10 - 25], r2
+
+    ; seeds[0] = "overseer"
+    mov64 r2, r10
+    sub64 r2, 32
+    stxdw [r10 - 120], r2
+    mov64 r2, SEED_OVERSEER_LEN
+    stxdw [r10 - 112], r2
+
+    ; seeds[1] = authority.key
+    ldxdw r2, [r10 - 8]
+    add64 r2, ACCT_KEY
+    stxdw [r10 - 104], r2
+    mov64 r2, SEED_PUBKEY_LEN
+    stxdw [r10 - 96], r2
+
+    ; seeds[2] = bump
+    mov64 r2, r10
+    sub64 r2, 40
+    stxdw [r10 - 88], r2
+    mov64 r2, SEED_BUMP_LEN
+    stxdw [r10 - 80], r2
+
+    ; sol_create_program_address(seeds, 3, prog_id, out_pda)
+    mov64 r1, r10
+    sub64 r1, 120
+    mov64 r2, 3
+    ldxdw r3, [r10 - 24]
+    mov64 r4, r10
+    sub64 r4, 72
+    call  sol_create_program_address
+    jne   r0, 0, error_invalid_pda
+
+    ; compare derived_pda with pda.key
+    mov64 r1, r10
+    sub64 r1, 72
+    ldxdw r2, [r10 - 16]
+    add64 r2, ACCT_KEY
+    call  cmp32
+    jne   r0, 0, error_invalid_pda
+
+    ; visits++
+    ldxdw r6, [r10 - 16]
+    add64 r6, ACCT_DATA             ; r6 = pda.data base (preserved across syscall)
+    ldxw  r2, [r6 + OS_VISITS]
+    add64 r2, 1
+    stxw  [r6 + OS_VISITS], r2
+
+    ; last_seen = Clock.unix_timestamp
+    mov64 r1, r10
+    sub64 r1, 160
+    call  sol_get_clock_sysvar
+    ldxdw r2, [r10 - 128]          ; Clock+0x20 = r10-160+32
+    stxdw [r6 + OS_LAST_SEEN], r2
+
+    mov64 r0, 0
+    exit
+
+; ── promote / deregister (stub) ───────────────────────
 promote_handler:
 deregister_handler:
     mov64 r0, 0xFF
@@ -437,6 +567,18 @@ error_invalid_pda:
 
 error_cpi_failed:
     mov64 r0, 0x05
+    exit
+
+error_wrong_owner:
+    mov64 r0, 0x06
+    exit
+
+error_wrong_size:
+    mov64 r0, 0x07
+    exit
+
+error_authority_mismatch:
+    mov64 r0, 0x08
     exit
 
 ; ── Helpers ───────────────────────────────────────────
