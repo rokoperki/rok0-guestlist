@@ -542,8 +542,219 @@ heartbeat_handler:
     mov64 r0, 0
     exit
 
-; ── promote / deregister (stub) ───────────────────────
+; ── promote ───────────────────────────────────────────
+; accounts:  [commander(0,signer)  commander_pda(1)  target_pda(2,w)]
+; ix_data:   [disc:2  target_wallet:32] = 33 bytes
+;
+; stack layout:
+;   [r10 -  8]  acct0 ptr (commander)
+;   [r10 - 16]  acct1 ptr (commander_pda)
+;   [r10 - 24]  acct2 ptr (target_pda)
+;   [r10 - 32]  prog_id ptr
+;   [r10 - 40]  target_wallet[0..7]
+;   [r10 - 48]  target_wallet[8..15]
+;   [r10 - 56]  target_wallet[16..23]
+;   [r10 - 64]  target_wallet[24..31]
+;   [r10 - 72]  "overseer" seed string (8 bytes, ptr = r10-72)
+;   [r10 - 80]  bump (u8, reused for both PDAs)
+;   [r10 -112]  derived_pda output (32 bytes, reused)
+;   [r10 -160]  seeds[0..2] (48 bytes, seeds[1].ptr updated per PDA)
+
 promote_handler:
+    ; account count == 3
+    ldxdw r2, [r1 + NUM_ACCOUNTS]
+    jne   r2, 3, error_wrong_accounts_number
+
+    ; commander (acct0) is signer
+    ldxdw r2, [r10 - 8]
+    ldxb  r2, [r2 + ACCT_IS_SIGNER]
+    jne   r2, 1, error_not_signer
+
+    ; ix_data_len >= 33
+    ldxdw r3, [r7 + 0]
+    jlt   r3, 33, error_invalid_ix
+
+    ; save prog_id ptr
+    mov64 r2, r7
+    add64 r2, 8
+    add64 r2, r3
+    stxdw [r10 - 32], r2
+
+    ; save target_wallet from ix_data[1..32] (r7+9)
+    ; stored in ASCENDING address order starting at r10-64 so cmp32
+    ; can walk [r2+0..r2+24] contiguously:
+    ;   r10-64 = target_wallet[0..7]   (lowest addr)
+    ;   r10-56 = target_wallet[8..15]
+    ;   r10-48 = target_wallet[16..23]
+    ;   r10-40 = target_wallet[24..31] (highest addr)
+    ldxdw r2, [r7 + 9]
+    stxdw [r10 - 64], r2
+    ldxdw r2, [r7 + 17]
+    stxdw [r10 - 56], r2
+    ldxdw r2, [r7 + 25]
+    stxdw [r10 - 48], r2
+    ldxdw r2, [r7 + 33]
+    stxdw [r10 - 40], r2
+
+    ; write "overseer" seed string at r10-72
+    mov64 r2, 0x6F
+    stxb  [r10 - 72], r2
+    mov64 r2, 0x76
+    stxb  [r10 - 71], r2
+    mov64 r2, 0x65
+    stxb  [r10 - 70], r2
+    mov64 r2, 0x72
+    stxb  [r10 - 69], r2
+    mov64 r2, 0x73
+    stxb  [r10 - 68], r2
+    mov64 r2, 0x65
+    stxb  [r10 - 67], r2
+    mov64 r2, 0x65
+    stxb  [r10 - 66], r2
+    mov64 r2, 0x72
+    stxb  [r10 - 65], r2
+
+    ; build seeds skeleton (seeds[0] and seeds[2] don't change between validations)
+    ; seeds[0] = "overseer"
+    mov64 r2, r10
+    sub64 r2, 72
+    stxdw [r10 - 160], r2
+    mov64 r2, SEED_OVERSEER_LEN
+    stxdw [r10 - 152], r2
+    ; seeds[1].len = 32 (ptr updated per PDA)
+    mov64 r2, SEED_PUBKEY_LEN
+    stxdw [r10 - 136], r2
+    ; seeds[2] = bump at r10-80
+    mov64 r2, r10
+    sub64 r2, 80
+    stxdw [r10 - 128], r2
+    mov64 r2, SEED_BUMP_LEN
+    stxdw [r10 - 120], r2
+
+    ; ── validate commander_pda ────────────────────────────
+
+    ; commander_pda.owner == program_id
+    ldxdw r1, [r10 - 32]
+    ldxdw r2, [r10 - 16]
+    add64 r2, ACCT_OWNER
+    call  cmp32
+    jne   r0, 0, error_wrong_owner
+
+    ; commander_pda.data_len >= OS_HEADER
+    ldxdw r2, [r10 - 16]
+    ldxdw r2, [r2 + ACCT_DLEN]
+    jlt   r2, OS_HEADER, error_wrong_size
+
+    ; commander_pda.authority == commander.key
+    ldxdw r1, [r10 - 16]
+    add64 r1, ACCT_DATA
+    ldxdw r2, [r10 - 8]
+    add64 r2, ACCT_KEY
+    call  cmp32
+    jne   r0, 0, error_authority_mismatch
+
+    ; seeds[1].ptr = commander.key
+    ldxdw r2, [r10 - 8]
+    add64 r2, ACCT_KEY
+    stxdw [r10 - 144], r2
+
+    ; read commander_pda bump → r10-80
+    ldxdw r2, [r10 - 16]
+    add64 r2, ACCT_DATA
+    ldxb  r2, [r2 + OS_BUMP]
+    stxb  [r10 - 80], r2
+
+    ; sol_create_program_address for commander_pda
+    mov64 r1, r10
+    sub64 r1, 160
+    mov64 r2, 3
+    ldxdw r3, [r10 - 32]
+    mov64 r4, r10
+    sub64 r4, 112
+    call  sol_create_program_address
+    jne   r0, 0, error_invalid_pda
+
+    ; compare derived with commander_pda.key
+    mov64 r1, r10
+    sub64 r1, 112
+    ldxdw r2, [r10 - 16]
+    add64 r2, ACCT_KEY
+    call  cmp32
+    jne   r0, 0, error_invalid_pda
+
+    ; commander_pda.clearance == COMMANDER (2)
+    ldxdw r2, [r10 - 16]
+    add64 r2, ACCT_DATA
+    ldxb  r2, [r2 + OS_CLEARANCE]
+    jne   r2, CLR_COMMANDER, error_not_commander
+
+    ; ── validate target_pda ───────────────────────────────
+
+    ; target_pda.owner == program_id
+    ldxdw r1, [r10 - 32]
+    ldxdw r2, [r10 - 24]
+    add64 r2, ACCT_OWNER
+    call  cmp32
+    jne   r0, 0, error_wrong_owner
+
+    ; target_pda.data_len >= OS_HEADER
+    ldxdw r2, [r10 - 24]
+    ldxdw r2, [r2 + ACCT_DLEN]
+    jlt   r2, OS_HEADER, error_wrong_size
+
+    ; target_pda.authority == target_wallet (ascending from r10-64)
+    ldxdw r1, [r10 - 24]
+    add64 r1, ACCT_DATA
+    mov64 r2, r10
+    sub64 r2, 64                    ; r10-64 = target_wallet[0..7] start
+    call  cmp32
+    jne   r0, 0, error_authority_mismatch
+
+    ; seeds[1].ptr = target_wallet (r10-64)
+    mov64 r2, r10
+    sub64 r2, 64
+    stxdw [r10 - 144], r2
+
+    ; read target_pda bump → r10-80 (reuse)
+    ldxdw r2, [r10 - 24]
+    add64 r2, ACCT_DATA
+    ldxb  r2, [r2 + OS_BUMP]
+    stxb  [r10 - 80], r2
+
+    ; sol_create_program_address for target_pda
+    mov64 r1, r10
+    sub64 r1, 160
+    mov64 r2, 3
+    ldxdw r3, [r10 - 32]
+    mov64 r4, r10
+    sub64 r4, 112
+    call  sol_create_program_address
+    jne   r0, 0, error_invalid_pda
+
+    ; compare derived with target_pda.key
+    mov64 r1, r10
+    sub64 r1, 112
+    ldxdw r2, [r10 - 24]
+    add64 r2, ACCT_KEY
+    call  cmp32
+    jne   r0, 0, error_invalid_pda
+
+    ; target_pda.clearance == OPERATIVE (0)
+    ldxdw r2, [r10 - 24]
+    add64 r2, ACCT_DATA
+    ldxb  r2, [r2 + OS_CLEARANCE]
+    jne   r2, CLR_OPERATIVE, error_not_operative
+
+    ; ── promote: OPERATIVE → OVERSEER ────────────────────
+    ldxdw r2, [r10 - 24]
+    add64 r2, ACCT_DATA
+    mov64 r3, CLR_OVERSEER
+    stxb  [r2 + OS_CLEARANCE], r3
+
+    mov64 r0, 0
+    exit
+
+; ── deregister (stub) ─────────────────────────────────
 deregister_handler:
     mov64 r0, 0xFF
     exit
@@ -579,6 +790,14 @@ error_wrong_size:
 
 error_authority_mismatch:
     mov64 r0, 0x08
+    exit
+
+error_not_commander:
+    mov64 r0, 0x09
+    exit
+
+error_not_operative:
+    mov64 r0, 0x0A
     exit
 
 ; ── Helpers ───────────────────────────────────────────

@@ -5,7 +5,7 @@ LEDGER := test-ledger
 MODE   := --mode interpreter
 IX_DIR := src/rok0_guestbook
 
-.PHONY: all build run-register run-heartbeat test clean
+.PHONY: all build run-register run-heartbeat run-promote test clean
 
 all: build test
 
@@ -40,6 +40,14 @@ run-heartbeat: $(SO)
 		$(MODE) \
 		--input $(IX_DIR)/instructions_heartbeat.json \
 		--trace trace_heartbeat.txt
+
+run-promote: $(SO)
+	@echo "==> run promote"
+	$(RUNNER) $(SO) \
+		--ledger $(LEDGER) \
+		$(MODE) \
+		--input $(IX_DIR)/instructions_promote.json \
+		--trace trace_promote.txt
 
 test: $(SO)
 	@echo "==> cargo test"
