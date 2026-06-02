@@ -1,0 +1,34 @@
+{
+  "program_id": "8ftm3ruaXh2sbrTeozPDmTQk8iJbG8SoUZtyYPFiq7jS",
+  "accounts": [
+    {
+      "key": "524HMdYYBy6TAn4dK5vCcjiTmT2sxV6Xoue5EXrz22Ca",
+      "owner": "11111111111111111111111111111111",
+      "is_signer": true,
+      "is_writable": true,
+      "executable": false,
+      "lamports": 10000000000,
+      "data": []
+    },
+    {
+      "key": "FcLoCjm5bo3de1WEBcuDxKJrdf8pPxxWubfJ28jLBFop",
+      "owner": "8ftm3ruaXh2sbrTeozPDmTQk8iJbG8SoUZtyYPFiq7jS",
+      "is_signer": false,
+      "is_writable": true,
+      "executable": false,
+      "lamports": 2000000,
+      "data": [
+        59, 180, 10, 27, 53, 174, 68, 250, 182, 197, 64, 125, 20, 13, 245, 130,
+        63, 209, 147, 189, 65, 82, 20, 53, 37, 71, 8, 125, 94, 87, 32, 27,
+        67, 65, 83, 80, 69, 82, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0, 0,
+        0, 0, 0, 0,
+        0,
+        255,
+        0, 0
+      ]
+    }
+  ],
+  "instruction_data": [3]
+}
