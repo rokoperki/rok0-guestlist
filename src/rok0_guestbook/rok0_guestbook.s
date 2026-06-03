@@ -37,12 +37,7 @@
 .equ IX_HEARTBEAT,      1
 .equ IX_PROMOTE,        2
 .equ IX_DEREGISTER,     3
-.equ IX_BOOTSTRAP,      4
-
-; ── Genesis authority (22kQ9csvmpgtaUxR92dsFRtQ6zDEMuT8wwngtBQs21Q2) ─
-; bytes: [15,78,86,218,98,30,95,107,106,67,102,47,70,24,10,166,
-;         215,207,229,4,140,130,177,146,206,156,1,113,178,248,196,223]
-; stored byte-by-byte — .equ is 32-bit in llvm-mc, can't hold 64-bit consts
+.equ IX_UPDATE_MESSAGE, 5
 
 ; ── Seed lengths ─────────────────────────────────────
 .equ SEED_OVERSEER_LEN, 8        ; "overseer"
@@ -121,7 +116,7 @@ find_ix_data_done:
     jeq   r4, IX_HEARTBEAT,  heartbeat_handler
     jeq   r4, IX_PROMOTE,    promote_handler
     jeq   r4, IX_DEREGISTER, deregister_handler
-    jeq   r4, IX_BOOTSTRAP,  bootstrap_handler
+    jeq   r4, IX_UPDATE_MESSAGE, update_message_handler
     ja    error_invalid_ix
 
 ; ── register ──────────────────────────────────────────
@@ -1157,213 +1152,179 @@ cmd_zero_done:
     mov64 r0, 0
     exit
 
-; ── bootstrap ─────────────────────────────────────────
-; One-time instruction: elevates genesis wallet to COMMANDER.
-; accounts:  [genesis(0,signer,w)  genesis_pda(1,w)]
-; ix_data:   [disc:1]
+; ── update_message ────────────────────────────────────
+; accounts:  [authority(0,signer)  pda(1,w)]
+; ix_data:   [disc:1  msg_len:2  message:msg_len]  minimum 3 bytes
 ;
-; stack layout:
-;   [r10 -  8]  acct0 ptr (genesis wallet)
-;   [r10 - 16]  acct1 ptr (genesis pda)
+; stack layout (same as heartbeat):
+;   [r10 -  8]  acct0 ptr (authority)
+;   [r10 - 16]  acct1 ptr (pda)
 ;   [r10 - 24]  prog_id ptr
-;   [r10 - 64]  genesis pubkey[0..7]   ← ascending, cmp32 ptr = r10-64
-;   [r10 - 56]  genesis pubkey[8..15]
-;   [r10 - 48]  genesis pubkey[16..23]
-;   [r10 - 40]  genesis pubkey[24..31]
-;   [r10 - 72]  "overseer" string (8 bytes, r10-72..r10-65)
-;   [r10 - 80]  bump (u8)
-;   [r10 -112]  derived_pda (32 bytes, r10-112..r10-81)
-;   [r10 -160]  seeds[0..2] (48 bytes)
+;   [r10 - 32]  "overseer" (8 bytes, ptr = r10-32)
+;   [r10 - 40]  bump (u8)
+;   [r10 - 72]  derived_pda (32 bytes)
+;   [r10 -120]  seeds[0..2] (48 bytes)
+;   [r10 -128]  new msg_len (u64)
 
-bootstrap_handler:
+update_message_handler:
     ; account count == 2
     ldxdw r2, [r1 + NUM_ACCOUNTS]
     jne   r2, 2, error_wrong_accounts_number
 
-    ; genesis (acct0) is signer and writable
+    ; authority (acct0) is signer
     ldxdw r2, [r10 - 8]
     ldxb  r2, [r2 + ACCT_IS_SIGNER]
     jne   r2, 1, error_not_signer
-    ldxdw r2, [r10 - 8]
-    ldxb  r2, [r2 + ACCT_IS_WRITE]
-    jne   r2, 1, error_not_writable
 
-    ; genesis_pda (acct1) is writable
+    ; pda (acct1) is writable
     ldxdw r2, [r10 - 16]
     ldxb  r2, [r2 + ACCT_IS_WRITE]
     jne   r2, 1, error_not_writable
 
-    ; save prog_id ptr
+    ; ix_data_len >= 3 (disc + 2-byte msg_len field)
     ldxdw r3, [r7 + 0]
+    jlt   r3, 3, error_invalid_ix
+
+    ; save prog_id ptr
     mov64 r2, r7
     add64 r2, 8
     add64 r2, r3
     stxdw [r10 - 24], r2
 
-    ; write genesis pubkey byte-by-byte ascending from r10-64
-    ; 22kQ9csvmpgtaUxR92dsFRtQ6zDEMuT8wwngtBQs21Q2
-    ; [15,78,86,218,98,30,95,107,106,67,102,47,70,24,10,166,
-    ;  215,207,229,4,140,130,177,146,206,156,1,113,178,248,196,223]
-    mov64 r2, 15
-    stxb  [r10 - 64], r2
-    mov64 r2, 78
-    stxb  [r10 - 63], r2
-    mov64 r2, 86
-    stxb  [r10 - 62], r2
-    mov64 r2, 218
-    stxb  [r10 - 61], r2
-    mov64 r2, 98
-    stxb  [r10 - 60], r2
-    mov64 r2, 30
-    stxb  [r10 - 59], r2
-    mov64 r2, 95
-    stxb  [r10 - 58], r2
-    mov64 r2, 107
-    stxb  [r10 - 57], r2
-    mov64 r2, 106
-    stxb  [r10 - 56], r2
-    mov64 r2, 67
-    stxb  [r10 - 55], r2
-    mov64 r2, 102
-    stxb  [r10 - 54], r2
-    mov64 r2, 47
-    stxb  [r10 - 53], r2
-    mov64 r2, 70
-    stxb  [r10 - 52], r2
-    mov64 r2, 24
-    stxb  [r10 - 51], r2
-    mov64 r2, 10
-    stxb  [r10 - 50], r2
-    mov64 r2, 166
-    stxb  [r10 - 49], r2
-    mov64 r2, 215
-    stxb  [r10 - 48], r2
-    mov64 r2, 207
-    stxb  [r10 - 47], r2
-    mov64 r2, 229
-    stxb  [r10 - 46], r2
-    mov64 r2, 4
-    stxb  [r10 - 45], r2
-    mov64 r2, 140
-    stxb  [r10 - 44], r2
-    mov64 r2, 130
-    stxb  [r10 - 43], r2
-    mov64 r2, 177
-    stxb  [r10 - 42], r2
-    mov64 r2, 146
-    stxb  [r10 - 41], r2
-    mov64 r2, 206
-    stxb  [r10 - 40], r2
-    mov64 r2, 156
-    stxb  [r10 - 39], r2
-    mov64 r2, 1
-    stxb  [r10 - 38], r2
-    mov64 r2, 113
-    stxb  [r10 - 37], r2
-    mov64 r2, 178
-    stxb  [r10 - 36], r2
-    mov64 r2, 248
-    stxb  [r10 - 35], r2
-    mov64 r2, 196
-    stxb  [r10 - 34], r2
-    mov64 r2, 223
-    stxb  [r10 - 33], r2
+    ; read new msg_len from ix_data[1..2] (r7+9)
+    ldxh  r2, [r7 + 9]
+    jgt   r2, MSG_MAX, error_invalid_ix
+    ; verify ix_data contains the full message: ix_data_len >= 3 + msg_len
+    mov64 r4, r2
+    add64 r4, 3
+    jlt   r3, r4, error_invalid_ix
+    stxdw [r10 - 128], r2           ; save new msg_len
 
-    ; signer.key == hardcoded genesis pubkey
-    ldxdw r1, [r10 - 8]
-    add64 r1, ACCT_KEY
-    mov64 r2, r10
-    sub64 r2, 64
-    call  cmp32
-    jne   r0, 0, error_not_genesis
-
-    ; genesis_pda.owner == program_id
+    ; pda.owner == program_id
     ldxdw r1, [r10 - 24]
     ldxdw r2, [r10 - 16]
     add64 r2, ACCT_OWNER
     call  cmp32
     jne   r0, 0, error_wrong_owner
 
-    ; genesis_pda.data_len >= OS_HEADER (must be registered first)
+    ; pda.data_len >= OS_HEADER
     ldxdw r2, [r10 - 16]
     ldxdw r2, [r2 + ACCT_DLEN]
     jlt   r2, OS_HEADER, error_wrong_size
 
-    ; not already a COMMANDER
-    ldxdw r2, [r10 - 16]
-    add64 r2, ACCT_DATA
-    ldxb  r2, [r2 + OS_CLEARANCE]
-    jeq   r2, CLR_COMMANDER, error_already_bootstrapped
+    ; pda.authority == authority.key
+    ldxdw r1, [r10 - 16]
+    add64 r1, ACCT_DATA
+    ldxdw r2, [r10 - 8]
+    add64 r2, ACCT_KEY
+    call  cmp32
+    jne   r0, 0, error_authority_mismatch
 
-    ; write "overseer" at r10-72..r10-65
+    ; write "overseer" at r10-32
     mov64 r2, 0x6F
-    stxb  [r10 - 72], r2
+    stxb  [r10 - 32], r2
     mov64 r2, 0x76
-    stxb  [r10 - 71], r2
+    stxb  [r10 - 31], r2
     mov64 r2, 0x65
-    stxb  [r10 - 70], r2
+    stxb  [r10 - 30], r2
     mov64 r2, 0x72
-    stxb  [r10 - 69], r2
+    stxb  [r10 - 29], r2
     mov64 r2, 0x73
-    stxb  [r10 - 68], r2
+    stxb  [r10 - 28], r2
     mov64 r2, 0x65
-    stxb  [r10 - 67], r2
+    stxb  [r10 - 27], r2
     mov64 r2, 0x65
-    stxb  [r10 - 66], r2
+    stxb  [r10 - 26], r2
     mov64 r2, 0x72
-    stxb  [r10 - 65], r2
+    stxb  [r10 - 25], r2
 
-    ; read bump from genesis_pda.data[OS_BUMP]
+    ; read bump from pda.data[OS_BUMP]
     ldxdw r2, [r10 - 16]
     add64 r2, ACCT_DATA
     ldxb  r2, [r2 + OS_BUMP]
-    stxb  [r10 - 80], r2
+    stxb  [r10 - 40], r2
 
     ; seeds[0] = "overseer"
     mov64 r2, r10
-    sub64 r2, 72
-    stxdw [r10 - 160], r2
+    sub64 r2, 32
+    stxdw [r10 - 120], r2
     mov64 r2, SEED_OVERSEER_LEN
-    stxdw [r10 - 152], r2
+    stxdw [r10 - 112], r2
 
-    ; seeds[1] = genesis.key
+    ; seeds[1] = authority.key
     ldxdw r2, [r10 - 8]
     add64 r2, ACCT_KEY
-    stxdw [r10 - 144], r2
+    stxdw [r10 - 104], r2
     mov64 r2, SEED_PUBKEY_LEN
-    stxdw [r10 - 136], r2
+    stxdw [r10 - 96], r2
 
-    ; seeds[2] = bump at r10-80
+    ; seeds[2] = bump at r10-40
     mov64 r2, r10
-    sub64 r2, 80
-    stxdw [r10 - 128], r2
+    sub64 r2, 40
+    stxdw [r10 - 88], r2
     mov64 r2, SEED_BUMP_LEN
-    stxdw [r10 - 120], r2
+    stxdw [r10 - 80], r2
 
-    ; sol_create_program_address(seeds, 3, prog_id, out_pda@r10-112)
+    ; sol_create_program_address
     mov64 r1, r10
-    sub64 r1, 160
+    sub64 r1, 120
     mov64 r2, 3
     ldxdw r3, [r10 - 24]
     mov64 r4, r10
-    sub64 r4, 112
+    sub64 r4, 72
     call  sol_create_program_address
     jne   r0, 0, error_invalid_pda
 
-    ; compare derived with genesis_pda.key
+    ; compare derived with pda.key
     mov64 r1, r10
-    sub64 r1, 112
+    sub64 r1, 72
     ldxdw r2, [r10 - 16]
     add64 r2, ACCT_KEY
     call  cmp32
     jne   r0, 0, error_invalid_pda
 
-    ; set clearance = COMMANDER
-    ldxdw r2, [r10 - 16]
-    add64 r2, ACCT_DATA
-    mov64 r3, CLR_COMMANDER
-    stxb  [r2 + OS_CLEARANCE], r3
+    ; ── update account ────────────────────────────────────
+    ldxdw r6, [r10 - 16]            ; r6 = pda ptr (preserved across nothing)
 
+    ; realloc: write new data_len = OS_HEADER + new_msg_len to input buffer
+    ldxdw r2, [r10 - 128]           ; new msg_len
+    mov64 r3, r2
+    add64 r3, OS_HEADER
+    stxdw [r6 + ACCT_DLEN], r3     ; tells runtime to resize account
+
+    ; r3 = pda.data base
+    mov64 r3, r6
+    add64 r3, ACCT_DATA
+
+    ; write new msg_len (u16) at OS_MSG_LEN
+    stxh  [r3 + OS_MSG_LEN], r2
+
+    ; copy new message bytes: src = r7+11 (ix_data[3]), dst = r3+OS_MESSAGE
+    mov64 r8, r7
+    add64 r8, 11                    ; r8 = message src (disc+msg_len_bytes+1 = 1+2=3, r7+8+3=r7+11)
+    mov64 r9, r3
+    add64 r9, OS_MESSAGE            ; r9 = message dst
+    ldxdw r3, [r10 - 128]          ; r3 = remaining bytes
+
+upd_msg_dw:
+    jlt   r3, 8, upd_msg_b
+    ldxdw r2, [r8 + 0]
+    stxdw [r9 + 0], r2
+    add64 r8, 8
+    add64 r9, 8
+    sub64 r3, 8
+    ja    upd_msg_dw
+
+upd_msg_b:
+    jeq   r3, 0, upd_msg_done
+    ldxb  r2, [r8 + 0]
+    stxb  [r9 + 0], r2
+    add64 r8, 1
+    add64 r9, 1
+    sub64 r3, 1
+    ja    upd_msg_b
+
+upd_msg_done:
     mov64 r0, 0
     exit
 
@@ -1410,14 +1371,6 @@ error_not_operative:
 
 error_not_writable:
     mov64 r0, 0x0B
-    exit
-
-error_not_genesis:
-    mov64 r0, 0x0C
-    exit
-
-error_already_bootstrapped:
-    mov64 r0, 0x0D
     exit
 
 ; ── Helpers ───────────────────────────────────────────
