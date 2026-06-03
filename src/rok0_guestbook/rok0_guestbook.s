@@ -40,11 +40,9 @@
 .equ IX_BOOTSTRAP,      4
 
 ; ── Genesis authority (22kQ9csvmpgtaUxR92dsFRtQ6zDEMuT8wwngtBQs21Q2) ─
-; stored as 4 × u64 LE for comparison via stxdw + cmp32
-.equ GENESIS_W0, 0x6B5F1E62DA564E0F
-.equ GENESIS_W1, 0xA60A18462F66436A
-.equ GENESIS_W2, 0x92B1828C04E5CFD7
-.equ GENESIS_W3, 0xDFC4F8B271019CCE
+; bytes: [15,78,86,218,98,30,95,107,106,67,102,47,70,24,10,166,
+;         215,207,229,4,140,130,177,146,206,156,1,113,178,248,196,223]
+; stored byte-by-byte — .equ is 32-bit in llvm-mc, can't hold 64-bit consts
 
 ; ── Seed lengths ─────────────────────────────────────
 .equ SEED_OVERSEER_LEN, 8        ; "overseer"
@@ -1202,15 +1200,74 @@ bootstrap_handler:
     add64 r2, r3
     stxdw [r10 - 24], r2
 
-    ; write genesis pubkey (4 × u64 LE) ascending from r10-64
-    mov64 r2, GENESIS_W0
-    stxdw [r10 - 64], r2
-    mov64 r2, GENESIS_W1
-    stxdw [r10 - 56], r2
-    mov64 r2, GENESIS_W2
-    stxdw [r10 - 48], r2
-    mov64 r2, GENESIS_W3
-    stxdw [r10 - 40], r2
+    ; write genesis pubkey byte-by-byte ascending from r10-64
+    ; 22kQ9csvmpgtaUxR92dsFRtQ6zDEMuT8wwngtBQs21Q2
+    ; [15,78,86,218,98,30,95,107,106,67,102,47,70,24,10,166,
+    ;  215,207,229,4,140,130,177,146,206,156,1,113,178,248,196,223]
+    mov64 r2, 15
+    stxb  [r10 - 64], r2
+    mov64 r2, 78
+    stxb  [r10 - 63], r2
+    mov64 r2, 86
+    stxb  [r10 - 62], r2
+    mov64 r2, 218
+    stxb  [r10 - 61], r2
+    mov64 r2, 98
+    stxb  [r10 - 60], r2
+    mov64 r2, 30
+    stxb  [r10 - 59], r2
+    mov64 r2, 95
+    stxb  [r10 - 58], r2
+    mov64 r2, 107
+    stxb  [r10 - 57], r2
+    mov64 r2, 106
+    stxb  [r10 - 56], r2
+    mov64 r2, 67
+    stxb  [r10 - 55], r2
+    mov64 r2, 102
+    stxb  [r10 - 54], r2
+    mov64 r2, 47
+    stxb  [r10 - 53], r2
+    mov64 r2, 70
+    stxb  [r10 - 52], r2
+    mov64 r2, 24
+    stxb  [r10 - 51], r2
+    mov64 r2, 10
+    stxb  [r10 - 50], r2
+    mov64 r2, 166
+    stxb  [r10 - 49], r2
+    mov64 r2, 215
+    stxb  [r10 - 48], r2
+    mov64 r2, 207
+    stxb  [r10 - 47], r2
+    mov64 r2, 229
+    stxb  [r10 - 46], r2
+    mov64 r2, 4
+    stxb  [r10 - 45], r2
+    mov64 r2, 140
+    stxb  [r10 - 44], r2
+    mov64 r2, 130
+    stxb  [r10 - 43], r2
+    mov64 r2, 177
+    stxb  [r10 - 42], r2
+    mov64 r2, 146
+    stxb  [r10 - 41], r2
+    mov64 r2, 206
+    stxb  [r10 - 40], r2
+    mov64 r2, 156
+    stxb  [r10 - 39], r2
+    mov64 r2, 1
+    stxb  [r10 - 38], r2
+    mov64 r2, 113
+    stxb  [r10 - 37], r2
+    mov64 r2, 178
+    stxb  [r10 - 36], r2
+    mov64 r2, 248
+    stxb  [r10 - 35], r2
+    mov64 r2, 196
+    stxb  [r10 - 34], r2
+    mov64 r2, 223
+    stxb  [r10 - 33], r2
 
     ; signer.key == hardcoded genesis pubkey
     ldxdw r1, [r10 - 8]
